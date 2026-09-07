@@ -22,6 +22,9 @@ INTENT_WORDS = {
 
 NOISE = {"project", "meeting", "meetings", "made", "make", "many", "list", "show", "give"}
 
+# Shared content words a delivery must have with an open item before it settles it.
+SETTLE_MIN_OVERLAP = 2
+
 
 def month_range(year, month):
     start = date(year, month, 1)
@@ -30,8 +33,11 @@ def month_range(year, month):
 
 
 class MemoryEngine:
-    def __init__(self, store_path):
+    def __init__(self, store_path, today=None):
+        # `today` pins the clock that "overdue" and relative-time queries are
+        # resolved against. Left as None it follows the real date.
         self.store_path = Path(store_path)
+        self._today = today
         self.meetings = {}
         self.commitments = []
         self.decisions = []
@@ -104,18 +110,25 @@ class MemoryEngine:
         return meeting
 
     def _settle(self, person, delivery_text, on_date):
+        """Close earlier open items by the same person that this delivery covers."""
         dtokens = set(tokenize(delivery_text))
+
+        def settles(owner, text, status, made_on):
+            return (owner == person and status == "open" and made_on <= on_date
+                    and len(dtokens & set(tokenize(text))) >= SETTLE_MIN_OVERLAP)
+
         for c in self.commitments:
-            if c.person == person and c.status == "open" and c.date <= on_date:
-                if len(dtokens & set(tokenize(c.text))) >= 2:
-                    c.status = "delivered"
-                    c.delivered_on = on_date
+            if settles(c.person, c.text, c.status, c.date):
+                c.status = "delivered"
+                c.delivered_on = on_date
         for d in self.deadlines:
-            if d.owner == person and d.status == "open" and d.date <= on_date:
-                if len(dtokens & set(tokenize(d.task))) >= 2:
-                    d.status = "done"
+            if settles(d.owner, d.task, d.status, d.date):
+                d.status = "done"
 
     # ── views ────────────────────────────────────────────────────
+
+    def today(self):
+        return self._today or date.today()
 
     def people(self):
         names = set()
@@ -124,7 +137,7 @@ class MemoryEngine:
         return sorted(names)
 
     def is_overdue(self, dl):
-        return dl.status == "open" and date.fromisoformat(dl.due) < date.today()
+        return dl.status == "open" and date.fromisoformat(dl.due) < self.today()
 
     def meeting_brief(self, m):
         return {"id": m.id, "title": m.title, "date": m.date,
@@ -138,13 +151,15 @@ class MemoryEngine:
         return v
 
     def stats(self):
-        today = date.today()
+        today = self.today()
         dates = sorted(m.date for m in self.meetings.values())
         overdue = [d for d in self.deadlines if self.is_overdue(d)]
         upcoming = [d for d in self.deadlines
                     if d.status == "open" and date.fromisoformat(d.due) >= today]
         open_c = [c for c in self.commitments if c.status == "open"]
         return {
+            "today": today.isoformat(),
+            "pinned_clock": self._today is not None,
             "meetings": len(self.meetings),
             "first_meeting": dates[0] if dates else None,
             "last_meeting": dates[-1] if dates else None,
@@ -167,7 +182,7 @@ class MemoryEngine:
         return None
 
     def _detect_timerange(self, query):
-        q, today = query.lower(), date.today()
+        q, today = query.lower(), self.today()
         m = re.search(r"\b(\d+|" + "|".join(WORD_NUMS) + r")\s+months?\s+ago\b", q)
         if m:
             n = int(m.group(1)) if m.group(1).isdigit() else WORD_NUMS[m.group(1)]

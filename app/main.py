@@ -8,13 +8,19 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .engine import MemoryEngine
+from .extract import parse_transcript
 from .seed_data import MEETINGS
 
 ROOT = Path(__file__).resolve().parent.parent
 STORE = Path(os.environ.get("MEETING_BRAIN_STORE", ROOT / "data" / "store.json"))
 
+# Pins "today" for overdue checks and relative-time queries. Unset, the app
+# follows the real date.
+_TODAY = os.environ.get("MEETING_BRAIN_TODAY")
+TODAY = date.fromisoformat(_TODAY) if _TODAY else None
+
 app = FastAPI(title="AI Meeting Brain", version="1.0.0")
-engine = MemoryEngine(STORE)
+engine = MemoryEngine(STORE, today=TODAY)
 
 if not engine.meetings:
     for m in MEETINGS:
@@ -62,19 +68,8 @@ def ingest(req: IngestRequest):
     try:
         date.fromisoformat(req.date)
     except ValueError:
-        raise HTTPException(422, "Date must be YYYY-MM-DD")
-    segments, attendees = [], []
-    for line in req.transcript.splitlines():
-        line = line.strip()
-        if not line or ":" not in line:
-            continue
-        speaker, text = line.split(":", 1)
-        speaker, text = speaker.strip(), text.strip()
-        if not speaker or not text or len(speaker.split()) > 3:
-            continue
-        segments.append({"speaker": speaker, "text": text})
-        if speaker not in attendees:
-            attendees.append(speaker)
+        raise HTTPException(422, "Date must be YYYY-MM-DD") from None
+    segments, attendees = parse_transcript(req.transcript)
     if not segments:
         raise HTTPException(422, "Transcript must contain 'Speaker: text' lines")
     meeting = engine.ingest(req.title, req.date, req.project, attendees, segments)

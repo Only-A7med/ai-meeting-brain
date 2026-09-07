@@ -1,4 +1,4 @@
-from app.extract import extract_from_meeting, parse_due
+from app.extract import extract_from_meeting, parse_due, parse_transcript
 from app.models import Meeting, Segment
 
 
@@ -49,6 +49,11 @@ def test_delivery_variants():
     assert len(deliveries) == 3
 
 
+def test_delivery_without_perfect_tense():
+    _, _, _, deliveries = extract("2026-07-01", ("A", "I closed out the legal sign-off."))
+    assert deliveries == [{"person": "A", "text": "The legal sign-off"}]
+
+
 def test_decision_variants():
     _, decs, _, _ = extract(
         "2026-07-01",
@@ -90,3 +95,67 @@ def test_parse_due_invalid_dates():
 def test_deadline_task_strips_due_phrase():
     _, _, dls, _ = extract("2026-07-01", ("Lina", "I'll publish the runbook by July 17."))
     assert dls == [{"owner": "Lina", "task": "I'll publish the runbook", "due": "2026-07-17"}]
+
+
+# ── transcript parsing ───────────────────────────────────────────
+
+def test_parse_transcript_basic():
+    segments, attendees = parse_transcript(
+        "Sara: Welcome everyone.\n"
+        "Ahmed: I'll deliver the report by July 20.\n"
+        "Sara: Thanks.\n"
+    )
+    assert segments == [
+        {"speaker": "Sara", "text": "Welcome everyone."},
+        {"speaker": "Ahmed", "text": "I'll deliver the report by July 20."},
+        {"speaker": "Sara", "text": "Thanks."},
+    ]
+    assert attendees == ["Sara", "Ahmed"]
+
+
+def test_parse_transcript_ignores_urls():
+    segments, attendees = parse_transcript(
+        "Sara: Welcome everyone.\n"
+        "See https://example.com for the deck.\n"
+        "https://example.com\n"
+    )
+    assert [s["speaker"] for s in segments] == ["Sara"]
+    assert attendees == ["Sara"]
+
+
+def test_parse_transcript_strips_timestamp_prefixes():
+    segments, _ = parse_transcript(
+        "[00:12:30] Ahmed: I'll deliver the report by July 20.\n"
+        "(1:05) Omar: We decided to ship on Friday.\n"
+        "00:42 Lina: Runbook is next.\n"
+        "9:15 AM Sara: Good morning.\n"
+    )
+    assert [s["speaker"] for s in segments] == ["Ahmed", "Omar", "Lina", "Sara"]
+    assert segments[0]["text"] == "I'll deliver the report by July 20."
+
+
+def test_parse_transcript_rejects_non_speaker_lines():
+    segments, _ = parse_transcript(
+        "nothing usable here\n"
+        "Khalid: \n"
+        "A really long speaker name that goes on and on and on: hi\n"
+        "\n"
+    )
+    assert segments == []
+
+
+def test_parse_transcript_keeps_multiword_and_tight_colon():
+    segments, _ = parse_transcript(
+        "Dr. Anne Marie: quarterly numbers look good.\n"
+        "Sara:no space after the colon\n"
+    )
+    assert segments == [
+        {"speaker": "Dr. Anne Marie", "text": "quarterly numbers look good."},
+        {"speaker": "Sara", "text": "no space after the colon"},
+    ]
+
+
+def test_timestamped_commitment_is_attributed_to_the_real_speaker():
+    segments, _ = parse_transcript("[00:12:30] Ahmed: I'll deliver the report by July 20.")
+    comms, _, _, _ = extract("2026-07-01", *[(s["speaker"], s["text"]) for s in segments])
+    assert comms == [{"person": "Ahmed", "text": "Deliver the report by July 20", "due": "2026-07-20"}]

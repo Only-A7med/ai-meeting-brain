@@ -37,6 +37,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .nav a .count{margin-left:auto;font-size:11px;background:var(--panel2);border:1px solid var(--border);padding:1px 7px;border-radius:20px;color:var(--dim)}
 .nav a.active .count{background:rgba(91,124,250,.18);border-color:transparent;color:var(--accent2)}
 .side-footer{margin-top:auto;padding:10px 12px;font-size:11px;color:var(--dim);line-height:1.6}
+.clock-note{margin-top:9px;color:var(--amber);font-size:10.5px;letter-spacing:.2px}
+.clock-note:empty{display:none}
 .btn-new{margin:14px 0 8px;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;border-radius:9px;background:var(--accent);color:#fff;border:none;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s}
 .btn-new:hover{background:var(--accent2)}
 
@@ -159,7 +161,9 @@ td.due{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
     <a data-view="deadlines"><span class="ico">◷</span><span>Deadlines</span><span class="count" id="n-overdue">–</span></a>
   </nav>
   <button class="btn-new" onclick="openModal()">＋ <span>New meeting</span></button>
-  <div class="side-footer">Every meeting, remembered forever.<br>Nothing promised is forgotten.</div>
+  <div class="side-footer">Every meeting, remembered forever.<br>Nothing promised is forgotten.
+    <div class="clock-note" id="clock-note"></div>
+  </div>
 </aside>
 
 <main class="main">
@@ -314,6 +318,9 @@ async function loadStats() {
   $("n-overdue").textContent = s.deadlines_overdue;
   if (s.first_meeting)
     $("dash-sub").textContent = `Remembering everything since ${fdate(s.first_meeting)} — ${s.projects.length} projects, ${s.people.length} people, zero forgotten promises.`;
+  // The seeded archive is a fixed corpus, so the demo pins "today" to the date
+  // it was written against. Say so rather than letting the dates look wrong.
+  $("clock-note").textContent = s.pinned_clock ? `Clock pinned to ${fdate(s.today)}` : "";
 }
 async function loadDashLists() {
   const [over, meetings] = await Promise.all([api("/api/deadlines?overdue=true"), api("/api/meetings")]);

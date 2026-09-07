@@ -1,5 +1,7 @@
-from app.engine import MemoryEngine
+from datetime import date
 
+from app.engine import MemoryEngine
+from app.seed_data import REFERENCE_DATE
 
 # ── query parsing ────────────────────────────────────────────────
 
@@ -125,3 +127,34 @@ def test_persistence_roundtrip(engine):
     assert len(reloaded.meetings) == 1
     assert len(reloaded.commitments) == 1
     assert reloaded.index.search("onboarding")
+
+
+# ── the demo clock ───────────────────────────────────────────────
+
+def test_clock_defaults_to_the_real_date(tmp_path):
+    assert MemoryEngine(tmp_path / "store.json").today() == date.today()
+
+
+def test_pinned_clock_is_reported_in_stats(seeded_engine):
+    s = seeded_engine.stats()
+    assert s["today"] == REFERENCE_DATE
+    assert s["pinned_clock"] is True
+
+
+def test_pinned_clock_drives_overdue(tmp_path):
+    line = {"speaker": "Ali", "text": "I'll draft the onboarding guide by March 20."}
+    before = MemoryEngine(tmp_path / "a.json", today=date(2026, 3, 19))
+    before.ingest("Sprint", "2026-03-02", "P", ["Ali"], [line])
+    assert before.stats()["deadlines_overdue"] == 0
+
+    after = MemoryEngine(tmp_path / "b.json", today=date(2026, 3, 21))
+    after.ingest("Sprint", "2026-03-02", "P", ["Ali"], [line])
+    assert after.stats()["deadlines_overdue"] == 1
+
+
+def test_pinned_clock_drives_relative_time_queries(tmp_path):
+    engine = MemoryEngine(tmp_path / "store.json", today=date(2026, 9, 7))
+    assert engine._detect_timerange("six months ago") == \
+        ("2026-03-01", "2026-03-31", "around March 2026")
+    assert engine._detect_timerange("last month") == \
+        ("2026-08-01", "2026-08-31", "in August 2026")

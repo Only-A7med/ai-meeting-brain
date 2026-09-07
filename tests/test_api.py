@@ -1,3 +1,6 @@
+from app.seed_data import REFERENCE_DATE
+
+
 def ask(client, query):
     r = client.post("/api/ask", json={"query": query})
     assert r.status_code == 200
@@ -106,3 +109,33 @@ def test_ingest_validation_and_extraction(client):
     assert len(detail["decisions"]) == 1
     assert len(detail["deadlines"]) == 1
     assert not detail["deadlines"][0]["overdue"]
+
+
+# Mutates shared app state — keep after the read-only assertions above.
+def test_ingest_handles_timestamps_and_urls(client):
+    r = client.post("/api/meetings", json={
+        "title": "Exported sync", "date": "2026-07-11", "project": "Procurement",
+        "transcript": "[00:00:04] Zara: I'll circulate the vendor shortlist by December 20.\n"
+                      "See https://example.com/deck for the slides.\n"
+                      "(0:31) Bilal: We decided to renew the support contract.\n",
+    })
+    assert r.status_code == 200
+    detail = client.get(f"/api/meetings/{r.json()['id']}").json()
+    assert detail["attendees"] == ["Zara", "Bilal"]
+    assert detail["commitments"][0]["person"] == "Zara"
+    assert detail["commitments"][0]["due"] == "2026-12-20"
+    assert detail["decisions"][0]["speaker"] == "Bilal"
+
+
+def test_ingest_rejects_transcript_of_only_urls(client):
+    r = client.post("/api/meetings", json={
+        "title": "Links", "date": "2026-07-11", "project": "P",
+        "transcript": "See https://example.com for the deck.\nhttps://example.com\n",
+    })
+    assert r.status_code == 422
+
+
+def test_stats_reports_the_pinned_demo_clock(client):
+    s = client.get("/api/stats").json()
+    assert s["today"] == REFERENCE_DATE
+    assert s["pinned_clock"] is True

@@ -1,0 +1,8 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+[lint.per-file-ignores]
+"app/seed_data.py" = ["E501"]

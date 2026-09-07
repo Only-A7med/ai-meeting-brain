@@ -11,9 +11,12 @@ COMMITMENT_RES = [
     re.compile(r"\bleave (?:that|it|this) with me[,;]?\s*(.+)", re.I),
 ]
 
+ADVERB = r"(?:also\s+|finally\s+|just\s+)?"
+DELIVERED = r"(?:finished|completed|delivered|shipped|sent|published|closed out)"
+
 DELIVERY_RES = [
-    re.compile(r"\bI(?:'ve| have)\s+(?:also\s+|finally\s+|just\s+)?(?:finished|completed|delivered|shipped|sent|published|closed out)\s+(.+)", re.I),
-    re.compile(r"\bI\s+(?:also\s+|finally\s+|just\s+)?(?:finished|completed|delivered|shipped|sent|published)\s+(.+)", re.I),
+    re.compile(rf"\bI(?:'ve| have)\s+{ADVERB}{DELIVERED}\s+(.+)", re.I),
+    re.compile(rf"\bI\s+{ADVERB}{DELIVERED}\s+(.+)", re.I),
 ]
 
 DECISION_RES = [
@@ -29,6 +32,27 @@ DUE_RES = [
     re.compile(rf"\bdue\s+(?:on\s+|by\s+)?({MONTH_RE})\s+(\d{{1,2}})\b", re.I),
     re.compile(rf"\bdeadline\s+(?:is\s+)?({MONTH_RE})\s+(\d{{1,2}})\b", re.I),
 ]
+
+# Removes the "by June 26" tail so a deadline's task reads as a task.
+DUE_PHRASE_RE = re.compile(
+    rf"[,.]?\s*(?:by|due(?:\s+on|\s+by)?|deadline(?:\s+is)?)\s+(?:{MONTH_RE})\s+\d{{1,2}}",
+    re.I,
+)
+
+# A transcript line is "Speaker: text", where the speaker is one to three words
+# each starting with a letter. The lookahead rejects the "//" of a URL, so
+# "See https://example.com" is not read as a speaker named "See https".
+SPEAKER_LINE_RE = re.compile(
+    r"^(?P<speaker>[^\W\d_][\w.'\-]*(?:[ \t]+[^\W\d_][\w.'\-]*){0,2}):(?!//)[ \t]*(?P<text>\S.*)$"
+)
+
+# Exporters prefix lines with a timestamp — "[00:12:30] Ahmed: …", "(1:05) …",
+# "00:12 …" — which would otherwise swallow the real speaker.
+TIMESTAMP_PREFIX_RE = re.compile(
+    r"^[\[(]?\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?(?:\s*[AaPp]\.?[Mm]\.?)?[\])]?\s+"
+)
+
+MAX_SPEAKER_LEN = 40
 
 
 def split_sentences(text):
@@ -71,6 +95,8 @@ def extract_from_meeting(meeting):
             if matched_delivery:
                 continue
 
+            due = parse_due(sentence, meeting.date)
+
             for rx in DECISION_RES:
                 m = rx.search(sentence)
                 if m:
@@ -88,15 +114,31 @@ def extract_from_meeting(meeting):
                             commitments.append({
                                 "person": seg.speaker,
                                 "text": clause,
-                                "due": parse_due(sentence, meeting.date),
+                                "due": due,
                             })
                         break
 
-            due = parse_due(sentence, meeting.date)
             if due:
                 deadlines.append({
                     "owner": seg.speaker,
-                    "task": clean_clause(re.sub(rf"[,.]?\s*(?:by|due(?:\s+on|\s+by)?|deadline(?:\s+is)?)\s+(?:{MONTH_RE})\s+\d{{1,2}}", "", sentence, flags=re.I)),
+                    "task": clean_clause(DUE_PHRASE_RE.sub("", sentence)),
                     "due": due,
                 })
     return commitments, decisions, deadlines, deliveries
+
+
+def parse_transcript(text):
+    """Parse "Speaker: text" lines into segments plus the speakers, in order."""
+    segments, attendees = [], []
+    for raw in text.splitlines():
+        line = TIMESTAMP_PREFIX_RE.sub("", raw.strip(), count=1)
+        m = SPEAKER_LINE_RE.match(line)
+        if not m:
+            continue
+        speaker = " ".join(m.group("speaker").split())
+        if len(speaker) > MAX_SPEAKER_LEN:
+            continue
+        segments.append({"speaker": speaker, "text": m.group("text").strip()})
+        if speaker not in attendees:
+            attendees.append(speaker)
+    return segments, attendees

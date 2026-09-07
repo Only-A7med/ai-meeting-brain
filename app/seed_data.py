@@ -1,3 +1,10 @@
+# The seeded archive is a fixed corpus: sixteen meetings running January to July
+# 2026, whose narrative is tied to that calendar ("Q1 Kickoff", "Mid-Year
+# Review"). REFERENCE_DATE is the day it was written to be read on, so relative
+# questions such as "six months ago" land on the January meetings. Pin the app
+# to it with MEETING_BRAIN_TODAY; see README "The demo clock".
+REFERENCE_DATE = "2026-07-12"
+
 MEETINGS = [
     {
         "title": "Q1 Kickoff — Project Atlas",
